@@ -138,6 +138,10 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{18}): &bls12381MapG2{},
 }
 
+var PrecompiledContractsNC = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{20}): &nCBlockVerify{},
+}
+
 var (
 	PrecompiledAddressesFjord     []common.Address
 	PrecompiledAddressesCancun    []common.Address
@@ -1190,4 +1194,15 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 		// Signature is invalid
 		return nil, nil
 	}
+}
+
+type nCBlockVerify struct{}
+
+func (c *nCBlockVerify) RequiredGas(input []byte) uint64 {
+	return params.NCBlockVerifyGas
+}
+
+func (c *nCBlockVerify) Run(input []byte) ([]byte, error) {
+	block := input[:32]
+	return common.LeftPadBytes(block, 32), nil
 }
