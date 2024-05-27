@@ -1,3 +1,7 @@
+// This code is adapted from the following repository:
+// Repository: https://github.com/stackup-wallet/erc-4337-execution-clients
+// Original file: tracers/bundler_executor.go.template
+
 package native
 
 import (
