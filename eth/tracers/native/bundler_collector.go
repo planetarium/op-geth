@@ -128,7 +128,9 @@ func (b *bundlerCollector) isEXTorCALL(opcode string) bool {
 // [OP-062]
 func (b *bundlerCollector) isAllowedPrecompile(addr common.Address) bool {
 	addrInt := addr.Big()
-	return (addrInt.Cmp(big.NewInt(0)) == 1 && addrInt.Cmp(big.NewInt(10)) == -1) || addrInt.Cmp(big.NewInt(256)) == 0
+	isWithinRange := addrInt.Cmp(big.NewInt(0)) == 1 && addrInt.Cmp(big.NewInt(10)) == -1
+	isP256VerifyAddress := addr.Cmp(common.BytesToAddress([]byte{0x01, 0x00})) == 0
+	return isWithinRange || isP256VerifyAddress
 }
 
 func (b *bundlerCollector) incrementCount(m map[string]uint64, k string) {
