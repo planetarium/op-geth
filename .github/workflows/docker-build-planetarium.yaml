@@ -1,6 +1,7 @@
 name: Build docker image for planetarium
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
   pull_request:
