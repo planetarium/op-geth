@@ -25,6 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/vm/libplanet"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/blake2b"
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
@@ -82,15 +83,16 @@ var PrecompiledContractsIstanbul = map[common.Address]PrecompiledContract{
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{1}): &ecrecover{},
-	common.BytesToAddress([]byte{2}): &sha256hash{},
-	common.BytesToAddress([]byte{3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{4}): &dataCopy{},
-	common.BytesToAddress([]byte{5}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{9}): &blake2F{},
+	common.BytesToAddress([]byte{1}):          &ecrecover{},
+	common.BytesToAddress([]byte{2}):          &sha256hash{},
+	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):          &dataCopy{},
+	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):          &blake2F{},
+	common.BytesToAddress([]byte{0x02, 0x00}): &libplanetVerifyProof{},
 }
 
 // PrecompiledContractsCancun contains the default set of pre-compiled Ethereum
@@ -199,6 +201,37 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
 	return output, suppliedGas, err
+}
+
+type libplanetVerifyProof struct{}
+
+func (c *libplanetVerifyProof) RequiredGas(input []byte) uint64 {
+	return uint64(3000)
+}
+
+func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
+	proofMap := map[string]any{
+		"stateRootHash": nil, // sha256(bencoded) []byte
+		"proof":         nil, // bencoded list [][]byte
+		"key":           nil, // keyBytes []byte
+		"value":         nil, // bencoded []byte
+	}
+	proofMap, err := libplanet.ParseMerkleTrieProofInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	stateRootHash := proofMap["stateRootHash"].([]byte)
+	proof := proofMap["proof"].([][]byte)
+	key := proofMap["key"].([]byte)
+	value := proofMap["value"].([]byte)
+
+	valid, err := libplanet.ValidateProof(stateRootHash, proof, key, value)
+	if err != nil {
+		return nil, err
+	}
+
+	return common.CopyBytes(libplanet.BoolAbi(valid)), nil
 }
 
 // ECRECOVER implemented as a native contract.
