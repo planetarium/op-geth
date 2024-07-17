@@ -226,10 +226,7 @@ func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
 	key := proofMap["key"].([]byte)
 	value := proofMap["value"].([]byte)
 
-	valid, err := libplanet.ValidateProof(stateRootHash, proof, key, value)
-	if err != nil {
-		return nil, err
-	}
+	valid, _ := libplanet.ValidateProof(stateRootHash, proof, key, value)
 
 	return common.CopyBytes(libplanet.BoolAbi(valid)), nil
 }
