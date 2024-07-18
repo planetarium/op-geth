@@ -25,13 +25,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/core/vm/libplanet"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/blake2b"
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
 	"github.com/ethereum/go-ethereum/crypto/bn256"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/crypto/secp256r1"
+	"github.com/ethereum/go-ethereum/libplanet"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/ripemd160"
 )
@@ -201,34 +201,6 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
 	return output, suppliedGas, err
-}
-
-type libplanetVerifyProof struct{}
-
-func (c *libplanetVerifyProof) RequiredGas(input []byte) uint64 {
-	return uint64(3000)
-}
-
-func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
-	proofMap := map[string]any{
-		"stateRootHash": nil, // sha256(bencoded) []byte
-		"proof":         nil, // bencoded list [][]byte
-		"key":           nil, // keyBytes []byte
-		"value":         nil, // bencoded []byte
-	}
-	proofMap, err := libplanet.ParseMerkleTrieProofInput(input)
-	if err != nil {
-		return nil, err
-	}
-
-	stateRootHash := proofMap["stateRootHash"].([]byte)
-	proof := proofMap["proof"].([][]byte)
-	key := proofMap["key"].([]byte)
-	value := proofMap["value"].([]byte)
-
-	valid, _ := libplanet.ValidateProof(stateRootHash, proof, key, value)
-
-	return common.CopyBytes(libplanet.BoolAbi(valid)), nil
 }
 
 // ECRECOVER implemented as a native contract.
@@ -1220,4 +1192,34 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 		// Signature is invalid
 		return nil, nil
 	}
+}
+
+// LibplanetVerifyProof implemented for verifying merkle trie proof
+// from blockchain networks built by Libplanet.
+type libplanetVerifyProof struct{}
+
+func (c *libplanetVerifyProof) RequiredGas(input []byte) uint64 {
+	return params.LibplanetVerifyProofGas
+}
+
+func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
+	proofMap := map[string]any{
+		"stateRootHash": nil, // sha256(bencoded) []byte
+		"proof":         nil, // bencoded list [][]byte
+		"key":           nil, // keyBytes []byte
+		"value":         nil, // bencoded []byte
+	}
+	proofMap, err := libplanet.ParseMerkleTrieProofInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	stateRootHash := proofMap["stateRootHash"].([]byte)
+	proof := proofMap["proof"].([][]byte)
+	key := proofMap["key"].([]byte)
+	value := proofMap["value"].([]byte)
+
+	valid, _ := libplanet.ValidateProof(stateRootHash, proof, key, value)
+
+	return common.CopyBytes(libplanet.BoolAbi(valid)), nil
 }
