@@ -563,8 +563,8 @@ github.com/sergi/go-diff v1.1.0/go.mod h1:STckp+ISIX8hZLjrqAeVduY0gWCT9IjLuqbuNX
 github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible h1:Bn1aCHHRnjv4Bl16T8rcaFjYSrGrIZvpiGO6P3Q4GpU=
 github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible/go.mod h1:5b4v6he4MtMOwMlS0TUMTu2PcXUg8+E1lC7eC3UO/RA=
 github.com/shurcooL/sanitized_anchor_name v1.0.0/go.mod h1:1NzhyTcUVG4SuEtjjoZeVRXNmyL/1OwPU0+IJeTBvfc=
-github.com/sircoon4/bencodex-go v0.1.1 h1:jyEhpnp666YXcLX6mfUYJvmkn8McgzTQtSyXeiqgG1o=
-github.com/sircoon4/bencodex-go v0.1.1/go.mod h1:ww6XR0kFWZ9IEW6x3/e2s3NxozC+Rrr5nvkGxl0irlg=
+github.com/sircoon4/bencodex-go v0.1.2 h1:ss2gVpo2HUhESmmbQgYtDmmkHvuaocKgD1Zj/n/1IYc=
+github.com/sircoon4/bencodex-go v0.1.2/go.mod h1:ww6XR0kFWZ9IEW6x3/e2s3NxozC+Rrr5nvkGxl0irlg=
 github.com/sirupsen/logrus v1.2.0/go.mod h1:LxeOpSwHxABJmUn/MG1IvRgCAasNZTLOkJPxbbu5VWo=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/sirupsen/logrus v1.6.0/go.mod h1:7uNnSEd1DgxDLC74fIahvMZmmYsHGZGEOFrfsX/uA88=
