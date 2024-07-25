@@ -6,15 +6,15 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/sircoon4/bencodex-go"
 )
 
 func ParseMerkleTrieProofInput(input []byte) (map[string]any, error) {
 	Bytes, _ := abi.NewType("bytes", "", nil)
-	BytesArr, _ := abi.NewType("bytes[]", "", nil)
 
 	var arguments = abi.Arguments{
 		abi.Argument{Name: "stateRootHash", Type: Bytes, Indexed: false},
-		abi.Argument{Name: "proof", Type: BytesArr, Indexed: false},
+		abi.Argument{Name: "proof", Type: Bytes, Indexed: false},
 		abi.Argument{Name: "key", Type: Bytes, Indexed: false},
 		abi.Argument{Name: "value", Type: Bytes, Indexed: false},
 	}
@@ -60,9 +60,14 @@ func keybytesToNibbles(str []byte) []byte {
 
 func checkProofNodeHash(
 	targetHash []byte, // sha256(bencoded)
-	bencodedProofNode []byte, // bencoded
+	proofData any, // bencodex type
 	first bool,
 ) error {
+	bencodedProofNode, err := bencodex.Encode(proofData)
+	if err != nil {
+		return err
+	}
+
 	if !first && len(bencodedProofNode) <= sha256.Size {
 		return fmt.Errorf("proof node must be longer than hash size")
 	}

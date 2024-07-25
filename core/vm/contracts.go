@@ -1205,7 +1205,7 @@ func (c *libplanetVerifyProof) RequiredGas(input []byte) uint64 {
 func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
 	proofMap := map[string]any{
 		"stateRootHash": nil, // sha256(bencoded) []byte
-		"proof":         nil, // bencoded list [][]byte
+		"proof":         nil, // bencoded(list) []byte
 		"key":           nil, // keyBytes []byte
 		"value":         nil, // bencoded []byte
 	}
@@ -1215,7 +1215,7 @@ func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
 	}
 
 	stateRootHash := proofMap["stateRootHash"].([]byte)
-	proof := proofMap["proof"].([][]byte)
+	proof := proofMap["proof"].([]byte)
 	key := proofMap["key"].([]byte)
 	value := proofMap["value"].([]byte)
 

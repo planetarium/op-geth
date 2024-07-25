@@ -3,31 +3,41 @@ package libplanet
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/sircoon4/bencodex-go"
 )
 
 func ValidateProof(
-	stateRootHash []byte, // []byte
-	proof [][]byte, // bencoded list
+	stateRootHash []byte, // sha256(bencoded)
+	proof []byte, // bencoded(list)
 	key []byte, // []byte
 	value []byte, // bencoded
 ) (bool, error) {
 	targetHash := stateRootHash
 	nibbles := keybytesToNibbles(key)
+	decodedProofList, err := bencodex.Decode(proof)
+	if err != nil {
+		return false, err
+	}
+	proofList, ok := decodedProofList.([]any)
+	if !ok {
+		return false, fmt.Errorf("proof must be a list")
+	}
 
-	for i, bencodedProofNode := range proof {
-		proofNode, err := nodeFromProof(bencodedProofNode)
+	for i, proofData := range proofList {
+		proofNode, err := nodeFromData(proofData)
 		if err != nil {
 			return false, err
 		}
 
 		first := i == 0
-		last := i == len(proof)-1
+		last := i == len(proofList)-1
 
 		if _, ok := proofNode.(hashNode); ok {
 			return false, fmt.Errorf("proof node cannot be a hash node")
 		}
 
-		if err := checkProofNodeHash(targetHash, bencodedProofNode, first); err != nil {
+		if err := checkProofNodeHash(targetHash, proofData, first); err != nil {
 			return false, err
 		}
 
