@@ -48,15 +48,6 @@ func (n valueNode) GetValue() []byte {
 	return n
 }
 
-func nodeFromProof(proof []byte) (node, error) {
-	data, err := bencodex.Decode(proof)
-	if err != nil {
-		return nil, err
-	}
-
-	return nodeFromData(data)
-}
-
 func nodeFromData(data any) (node, error) {
 	if data == nil {
 		return nil, nil

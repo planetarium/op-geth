@@ -6,15 +6,15 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/sircoon4/bencodex-go"
 )
 
 func ParseMerkleTrieProofInput(input []byte) (map[string]any, error) {
 	Bytes, _ := abi.NewType("bytes", "", nil)
-	BytesArr, _ := abi.NewType("bytes[]", "", nil)
 
 	var arguments = abi.Arguments{
 		abi.Argument{Name: "stateRootHash", Type: Bytes, Indexed: false},
-		abi.Argument{Name: "proof", Type: BytesArr, Indexed: false},
+		abi.Argument{Name: "proof", Type: Bytes, Indexed: false},
 		abi.Argument{Name: "key", Type: Bytes, Indexed: false},
 		abi.Argument{Name: "value", Type: Bytes, Indexed: false},
 	}
@@ -60,9 +60,14 @@ func keybytesToNibbles(str []byte) []byte {
 
 func checkProofNodeHash(
 	targetHash []byte, // sha256(bencoded)
-	bencodedProofNode []byte, // bencoded
+	proofData any, // bencodex type
 	first bool,
 ) error {
+	bencodedProofNode, err := bencodex.Encode(proofData)
+	if err != nil {
+		return err
+	}
+
 	if !first && len(bencodedProofNode) <= sha256.Size {
 		return fmt.Errorf("proof node must be longer than hash size")
 	}
@@ -114,4 +119,30 @@ func resolveToNextCandidateNode(
 	}
 
 	return nil, nil, fmt.Errorf("invalid proof node")
+}
+
+func validProofKey(key []byte) ([]byte, error) {
+	if len(key) == 20 {
+		return toStateKey(key), nil
+	}
+
+	if len(key) == 40 {
+		return key, nil
+	}
+
+	return nil, fmt.Errorf("invalid key length")
+}
+
+func toStateKey(key []byte) []byte {
+	var _conversionTable = []byte{
+		48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102,
+	}
+
+	l := len(key)
+	var stateKey = make([]byte, l*2)
+	for i, b := range key {
+		stateKey[i*2] = _conversionTable[b>>4]
+		stateKey[i*2+1] = _conversionTable[b&0xf]
+	}
+	return stateKey
 }
