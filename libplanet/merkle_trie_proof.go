@@ -13,6 +13,10 @@ func ValidateProof(
 	key []byte, // []byte
 	value []byte, // bencoded
 ) (bool, error) {
+	key, err := validProofKey(key)
+	if err != nil {
+		return false, err
+	}
 	targetHash := stateRootHash
 	nibbles := keybytesToNibbles(key)
 	decodedProofList, err := bencodex.Decode(proof)
