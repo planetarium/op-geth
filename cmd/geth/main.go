@@ -70,6 +70,7 @@ var (
 		utils.OverrideOptimismCanyon,
 		utils.OverrideOptimismEcotone,
 		utils.OverrideOptimismFjord,
+		utils.OverrideOptimismLibplanet,
 		utils.OverrideOptimismInterop,
 		utils.EnablePersonal,
 		utils.TxPoolLocalsFlag,

@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -33,6 +34,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/secp256r1"
 	"github.com/ethereum/go-ethereum/libplanet"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/sircoon4/bencodex-go"
+	"github.com/sircoon4/bencodex-go/bencodextype"
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -123,7 +126,24 @@ var PrecompiledContractsFjord = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{9}):          &blake2F{},
 	common.BytesToAddress([]byte{0x0a}):       &kzgPointEvaluation{},
 	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+}
+
+// PrecompiledContractsLibplanet contains the default set of pre-compiled Ethereum
+// contracts used in the Libplanet release.
+var PrecompiledContractsLibplanet = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}):          &ecrecover{},
+	common.BytesToAddress([]byte{2}):          &sha256hash{},
+	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):          &dataCopy{},
+	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):          &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &kzgPointEvaluation{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 	common.BytesToAddress([]byte{0x02, 0x00}): &libplanetVerifyProof{},
+	common.BytesToAddress([]byte{0x02, 0x01}): &libplanetWithdrawalTransactionHashing{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -141,6 +161,7 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 }
 
 var (
+	PrecompiledAddressesLibplanet []common.Address
 	PrecompiledAddressesFjord     []common.Address
 	PrecompiledAddressesCancun    []common.Address
 	PrecompiledAddressesBerlin    []common.Address
@@ -168,11 +189,16 @@ func init() {
 	for k := range PrecompiledContractsFjord {
 		PrecompiledAddressesFjord = append(PrecompiledAddressesFjord, k)
 	}
+	for k := range PrecompiledContractsLibplanet {
+		PrecompiledAddressesLibplanet = append(PrecompiledAddressesLibplanet, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
+	case rules.IsOptimismLibplanet:
+		return PrecompiledAddressesLibplanet
 	case rules.IsOptimismFjord:
 		return PrecompiledAddressesFjord
 	case rules.IsCancun:
@@ -1205,8 +1231,8 @@ func (c *libplanetVerifyProof) RequiredGas(input []byte) uint64 {
 func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
 	proofMap := map[string]any{
 		"stateRootHash": nil, // sha256(bencoded) []byte
-		"proof":         nil, // bencoded list [][]byte
-		"key":           nil, // keyBytes []byte
+		"proof":         nil, // bencoded(list) []byte
+		"key":           nil, // keyBytes | address []byte
 		"value":         nil, // bencoded []byte
 	}
 	proofMap, err := libplanet.ParseMerkleTrieProofInput(input)
@@ -1215,11 +1241,50 @@ func (c *libplanetVerifyProof) Run(input []byte) ([]byte, error) {
 	}
 
 	stateRootHash := proofMap["stateRootHash"].([]byte)
-	proof := proofMap["proof"].([][]byte)
+	proof := proofMap["proof"].([]byte)
 	key := proofMap["key"].([]byte)
 	value := proofMap["value"].([]byte)
 
 	valid, _ := libplanet.ValidateProof(stateRootHash, proof, key, value)
 
 	return common.CopyBytes(libplanet.BoolAbi(valid)), nil
+}
+
+type libplanetWithdrawalTransactionHashing struct{}
+
+func (c *libplanetWithdrawalTransactionHashing) RequiredGas(input []byte) uint64 {
+	return params.LibplanetWithdrawalTransactionHashingGas
+}
+
+func (c *libplanetWithdrawalTransactionHashing) Run(input []byte) ([]byte, error) {
+	withdrawalTransaction := map[string]any{
+		"nonce":  nil, // *big.Int
+		"from":   nil, // common.Address
+		"to":     nil, // common.Address
+		"amount": nil, // *big.Int
+	}
+	withdrawalTransaction, err := libplanet.ParseWithdrawalTransactionInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := withdrawalTransaction["nonce"].(*big.Int)
+	from := withdrawalTransaction["from"].(common.Address).Bytes()
+	to := withdrawalTransaction["to"].(common.Address).Bytes()
+	amount := withdrawalTransaction["amount"].(*big.Int)
+
+	dict := bencodextype.NewDictionary()
+	dict.Set("nonce", nonce)
+	dict.Set("from", from)
+	dict.Set("to", to)
+	dict.Set("amount", amount)
+
+	encoded, err := bencodex.Encode(dict)
+	if err != nil {
+		return nil, err
+	}
+
+	sum := sha1.Sum(encoded)
+
+	return common.CopyBytes(libplanet.AddressAbi(sum)), nil
 }
