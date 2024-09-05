@@ -189,6 +189,11 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 		cfg.Eth.OverrideOptimismFjord = &v
 	}
 
+	if ctx.IsSet(utils.OverrideOptimismLibplanetVn1.Name) {
+		v := ctx.Uint64(utils.OverrideOptimismLibplanetVn1.Name)
+		cfg.Eth.OverrideOptimismLibplanetVn1 = &v
+	}
+
 	if ctx.IsSet(utils.OverrideOptimismInterop.Name) {
 		v := ctx.Uint64(utils.OverrideOptimismInterop.Name)
 		cfg.Eth.OverrideOptimismInterop = &v

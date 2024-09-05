@@ -396,6 +396,8 @@ type ChainConfig struct {
 	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
 	FjordTime   *uint64 `json:"fjordTime,omitempty"`   // Fjord switch time (nil = no fork, 0 = already on Optimism Fjord)
 
+	LibplanetVn1Time *uint64 `json:"libplanetVn1Time,omitempty"` // Libplanet switch time (nil = no fork, 0 = already on libplanetVn1)
+
 	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
@@ -549,6 +551,9 @@ func (c *ChainConfig) Description() string {
 	if c.FjordTime != nil {
 		banner += fmt.Sprintf(" - Fjord:                       @%-10v\n", *c.FjordTime)
 	}
+	if c.LibplanetVn1Time != nil {
+		banner += fmt.Sprintf(" - LibplanetVn1:                @%-10v\n", *c.LibplanetVn1Time)
+	}
 	if c.InteropTime != nil {
 		banner += fmt.Sprintf(" - Interop:                     @%-10v\n", *c.InteropTime)
 	}
@@ -676,6 +681,10 @@ func (c *ChainConfig) IsFjord(time uint64) bool {
 	return isTimestampForked(c.FjordTime, time)
 }
 
+func (c *ChainConfig) IsLibplanetVn1(time uint64) bool {
+	return isTimestampForked(c.LibplanetVn1Time, time)
+}
+
 func (c *ChainConfig) IsInterop(time uint64) bool {
 	return isTimestampForked(c.InteropTime, time)
 }
@@ -704,6 +713,10 @@ func (c *ChainConfig) IsOptimismEcotone(time uint64) bool {
 
 func (c *ChainConfig) IsOptimismFjord(time uint64) bool {
 	return c.IsOptimism() && c.IsFjord(time)
+}
+
+func (c *ChainConfig) IsOptimismLibplanetVn1(time uint64) bool {
+	return c.IsOptimism() && c.IsLibplanetVn1(time)
 }
 
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
@@ -1047,6 +1060,7 @@ type Rules struct {
 	IsVerkle                                                bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 	IsOptimismCanyon, IsOptimismFjord                       bool
+	IsOptimismLibplanetVn1                                  bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1075,9 +1089,10 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsPrague:         isMerge && c.IsPrague(num, timestamp),
 		IsVerkle:         isMerge && c.IsVerkle(num, timestamp),
 		// Optimism
-		IsOptimismBedrock:  isMerge && c.IsOptimismBedrock(num),
-		IsOptimismRegolith: isMerge && c.IsOptimismRegolith(timestamp),
-		IsOptimismCanyon:   isMerge && c.IsOptimismCanyon(timestamp),
-		IsOptimismFjord:    isMerge && c.IsOptimismFjord(timestamp),
+		IsOptimismBedrock:      isMerge && c.IsOptimismBedrock(num),
+		IsOptimismRegolith:     isMerge && c.IsOptimismRegolith(timestamp),
+		IsOptimismCanyon:       isMerge && c.IsOptimismCanyon(timestamp),
+		IsOptimismFjord:        isMerge && c.IsOptimismFjord(timestamp),
+		IsOptimismLibplanetVn1: isMerge && c.IsOptimismLibplanetVn1(timestamp),
 	}
 }

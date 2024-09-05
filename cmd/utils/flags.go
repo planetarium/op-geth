@@ -276,6 +276,11 @@ var (
 		Usage:    "Manually specify the Optimism Fjord fork timestamp, overriding the bundled setting",
 		Category: flags.EthCategory,
 	}
+	OverrideOptimismLibplanetVn1 = &cli.Uint64Flag{
+		Name:     "override.libplanetVn1",
+		Usage:    "Manually specify the Optimism LibplanetVn1 fork timestamp, overriding the bundled setting",
+		Category: flags.EthCategory,
+	}
 	OverrideOptimismInterop = &cli.Uint64Flag{
 		Name:     "override.interop",
 		Usage:    "Manually specify the Optimsim Interop feature-set fork timestamp, overriding the bundled setting",
