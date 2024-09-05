@@ -128,9 +128,9 @@ var PrecompiledContractsFjord = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
-// PrecompiledContractsLibplanetVn1 contains the default set of pre-compiled Ethereum
-// contracts used in the LibplanetVn1 release.
-var PrecompiledContractsLibplanetVn1 = map[common.Address]PrecompiledContract{
+// PrecompiledContractsLibplanet contains the default set of pre-compiled Ethereum
+// contracts used in the Libplanet release.
+var PrecompiledContractsLibplanet = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{1}):          &ecrecover{},
 	common.BytesToAddress([]byte{2}):          &sha256hash{},
 	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
@@ -161,13 +161,13 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 }
 
 var (
-	PrecompiledAddressesLibplanetVn1 []common.Address
-	PrecompiledAddressesFjord        []common.Address
-	PrecompiledAddressesCancun       []common.Address
-	PrecompiledAddressesBerlin       []common.Address
-	PrecompiledAddressesIstanbul     []common.Address
-	PrecompiledAddressesByzantium    []common.Address
-	PrecompiledAddressesHomestead    []common.Address
+	PrecompiledAddressesLibplanet []common.Address
+	PrecompiledAddressesFjord     []common.Address
+	PrecompiledAddressesCancun    []common.Address
+	PrecompiledAddressesBerlin    []common.Address
+	PrecompiledAddressesIstanbul  []common.Address
+	PrecompiledAddressesByzantium []common.Address
+	PrecompiledAddressesHomestead []common.Address
 )
 
 func init() {
@@ -189,16 +189,16 @@ func init() {
 	for k := range PrecompiledContractsFjord {
 		PrecompiledAddressesFjord = append(PrecompiledAddressesFjord, k)
 	}
-	for k := range PrecompiledContractsLibplanetVn1 {
-		PrecompiledAddressesLibplanetVn1 = append(PrecompiledAddressesLibplanetVn1, k)
+	for k := range PrecompiledContractsLibplanet {
+		PrecompiledAddressesLibplanet = append(PrecompiledAddressesLibplanet, k)
 	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
-	case rules.IsOptimismLibplanetVn1:
-		return PrecompiledAddressesLibplanetVn1
+	case rules.IsOptimismLibplanet:
+		return PrecompiledAddressesLibplanet
 	case rules.IsOptimismFjord:
 		return PrecompiledAddressesFjord
 	case rules.IsCancun:

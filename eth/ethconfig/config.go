@@ -167,7 +167,7 @@ type Config struct {
 
 	OverrideOptimismFjord *uint64 `toml:",omitempty"`
 
-	OverrideOptimismLibplanetVn1 *uint64 `toml:",omitempty"`
+	OverrideOptimismLibplanet *uint64 `toml:",omitempty"`
 
 	OverrideOptimismInterop *uint64 `toml:",omitempty"`
 
