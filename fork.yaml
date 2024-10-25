@@ -5,7 +5,7 @@ footer: |
 base:
   name: go-ethereum
   url: https://github.com/ethereum/go-ethereum
-  hash: c5ba367eb6232e3eddd7d6226bfd374449c63164 # v1.13.15
+  hash: f3c696fa1db75d0f78ea47dd0975f6f0de6fdd84 # v1.14.11
 fork:
   name: op-geth
   url: https://github.com/ethereum-optimism/op-geth
@@ -49,12 +49,21 @@ def:
                 - "core/types/tx_dynamic_fee.go"
                 - "core/types/tx_legacy.go"
                 - "core/types/tx_blob.go"
+            - title: "EVM enhancements"
+              description: |
+                Apply L1 cost computation, and add EVM configuration for tooling and more:
+                - Disable bytecode size-limits (for large test/script contracts).
+                - Prank (solidity test terminology) the EVM-call message-sender.
+                - Override precompiles, to insert tooling precompiles and optimize precompile proving.
+              globs:
+                - "core/vm/evm.go"
+                - "core/vm/interpreter.go"
+                - "core/vm/gas_table.go"
             - title: "L1 cost computation"
               description: |
                 Transactions must pay an additional L1 cost based on the amount of rollup-data-gas they consume,
                 estimated based on gas-price-oracle information and encoded tx size."
               globs:
-                - "core/vm/evm.go"
                 - "core/evm.go"
                 - "core/types/rollup_cost.go"
                 - "core/state_processor.go"
@@ -113,6 +122,12 @@ def:
           globs:
             - "core/txpool/**/*"
             - "core/txpool/legacypool/*"
+        - title: "RIP-7212"
+          description: ""
+          globs:
+            - "core/vm/contracts.go"
+            - "crypto/secp256r1/publickey.go"
+            - "crypto/secp256r1/verifier.go"
     - title: "Chain Configuration"
       sub:
         - title: "Chain config"
@@ -195,6 +210,21 @@ def:
         - title: Generated TOML config update
           globs:
             - "eth/ethconfig/gen_config.go"
+    - title: "TrieDB PathDB-journal migration"
+      description: |
+        From version 1.13.15 to 1.14.0 upstream go-ethereum changed the PathDB journal version, without migration path.
+        For a better experience when updating op-geth, to not roll back any journaled stage changes,
+        op-geth implements backward-compatibility with the old journal version.
+        See upstream Geth PR 28940, and op-geth PR 368 for details.
+      globs:
+        - "triedb/pathdb/journal.go"
+    - title: "Single threaded execution"
+      description: |
+        The cannon fault proofs virtual machine does not support the creation of threads. To ensure compatibility, 
+        thread creation is avoided when only a single CPU is available.
+      globs:
+        - "core/state/workers.go"
+        - "trie/hasher.go"
     - title: "User API enhancements"
       description: "Encode the Deposit Tx properties, the L1 costs, and daisy-chain RPC-calls for pre-Bedrock historical data"
       sub:
@@ -245,6 +275,32 @@ def:
             and the chain ID formula on signature data must not be used, or an underflow happens.
           globs:
             - "internal/ethapi/testdata/eth_getBlockByNumber-tag-pending-fullTx.json"
+    - title: "4337 Improvements"
+      description: ""
+      sub:
+        - title: eth_sendRawTransactionConditional
+          description: sequencer api for conditional transaction inclusion enforced out of protocol
+          globs:
+            - "cmd/geth/main.go"
+            - "cmd/utils/flags.go"
+            - "core/state/statedb.go"
+            - "core/state/statedb_test.go"
+            - "core/types/block.go"
+            - "core/types/block_test.go"
+            - "core/types/transaction.go"
+            - "core/types/transaction_conditional.go"
+            - "core/types/transaction_conditional.go"
+            - "core/types/transaction_conditional_test.go"
+            - "core/types/gen_transaction_conditional_json.go"
+            - "eth/backend.go"
+            - "eth/ethconfig/config.go"
+            - "eth/protocols/eth/broadcast.go"
+            - "internal/sequencerapi/api.go"
+            - "miner/miner.go"
+            - "miner/miner_test.go"
+            - "miner/worker.go"
+            - "params/conditional_tx_params.go"
+            - "rpc/json.go"
     - title: "Geth extras"
       description: Extend the tools available in geth to improve external testing and tooling.
       sub:
@@ -252,6 +308,13 @@ def:
           globs:
             - "accounts/abi/bind/backends/simulated.go"
             - "ethclient/simulated/backend.go"
+        - title: Live tracer update
+          description: |
+            Track L1-deposited native currency that is coming into the L2 supply.
+            The balance delta is considered to be a "withdrawal" from L1,
+            similar to a withdrawal of the Beacon-chain into the Ethereum L1 execution chain.
+          globs:
+            - "eth/tracers/live/supply.go"
     - title: "Hardware wallet support"
       description: Extend Ledger wallet support for newer devices on Macos
       sub:

@@ -41,7 +41,16 @@ var (
 	errUnmatchedJournal  = errors.New("unmatched journal")
 )
 
-const journalVersion uint64 = 0
+// journalVersion ensures that an incompatible journal is detected and discarded.
+//
+// Changelog:
+//
+// - Version 0: initial version
+// - Version 1: storage.Incomplete field is removed
+const (
+	journalVersion   uint64 = 1
+	journalVersionV0 uint64 = 0
+)
 
 // journalNode represents a trie node persisted in the journal.
 type journalNode struct {
@@ -64,7 +73,14 @@ type journalAccounts struct {
 
 // journalStorage represents a list of storage slots belong to an account.
 type journalStorage struct {
-	Incomplete bool
+	Account common.Address
+	Hashes  []common.Hash
+	Slots   [][]byte
+}
+
+// journalStorageV0 represents a journal version 0 storage update.
+type journalStorageV0 struct {
+	Incomplete bool // In V0, to handle self-destructs, the stateDB would abort a storage-diff if it got too large.
 	Account    common.Address
 	Hashes     []common.Hash
 	Slots      [][]byte
@@ -83,7 +99,7 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 	if err != nil {
 		return nil, errMissVersion
 	}
-	if version != journalVersion {
+	if version != journalVersionV0 && version != journalVersion {
 		return nil, fmt.Errorf("%w want %d got %d", errUnexpectedVersion, journalVersion, version)
 	}
 	// Secondly, resolve the disk layer root, ensure it's continuous
@@ -104,7 +120,7 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 		return nil, err
 	}
 	// Load all the diff layers from the journal
-	head, err := db.loadDiffLayer(base, r)
+	head, err := db.loadDiffLayer(base, r, version)
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +131,10 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 // loadLayers loads a pre-existing state layer backed by a key-value store.
 func (db *Database) loadLayers() layer {
 	// Retrieve the root node of persistent state.
-	_, root := rawdb.ReadAccountTrieNode(db.diskdb, nil)
-	root = types.TrieRootHash(root)
-
+	root := types.EmptyRootHash
+	if blob := rawdb.ReadAccountTrieNode(db.diskdb, nil); len(blob) > 0 {
+		root = crypto.Keccak256Hash(blob)
+	}
 	// Load the layers by resolving the journal
 	head, err := db.loadJournal(root)
 	if err == nil {
@@ -176,7 +193,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 
 // loadDiffLayer reads the next sections of a layer journal, reconstructing a new
 // diff and verifying that it can be linked to the requested parent.
-func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
+func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, layerJournalVersion uint64) (layer, error) {
 	// Read the next diff journal entry
 	var root common.Hash
 	if err := r.Decode(&root); err != nil {
@@ -209,11 +226,10 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 	}
 	// Read state changes from journal
 	var (
-		jaccounts  journalAccounts
-		jstorages  []journalStorage
-		accounts   = make(map[common.Address][]byte)
-		storages   = make(map[common.Address]map[common.Hash][]byte)
-		incomplete = make(map[common.Address]struct{})
+		jaccounts journalAccounts
+		jstorages []journalStorage
+		accounts  = make(map[common.Address][]byte)
+		storages  = make(map[common.Address]map[common.Hash][]byte)
 	)
 	if err := r.Decode(&jaccounts); err != nil {
 		return nil, fmt.Errorf("load diff accounts: %v", err)
@@ -221,7 +237,25 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 	for i, addr := range jaccounts.Addresses {
 		accounts[addr] = jaccounts.Accounts[i]
 	}
-	if err := r.Decode(&jstorages); err != nil {
+	if layerJournalVersion == journalVersionV0 {
+		log.Warn("loading legacy v0 journal")
+		var jstoragesV0 []journalStorageV0
+		if err := r.Decode(&jstoragesV0); err != nil {
+			return nil, fmt.Errorf("load diff storages: %w", err)
+		}
+		jstorages = make([]journalStorage, 0, len(jstoragesV0))
+		for _, st := range jstoragesV0 {
+			if st.Incomplete { // Storage diff entries that are complete are compatible with the journal v1 type.
+				log.Warn("legacy v0 diff layer shows incomplete storage-diff write, cannot recover this, have to drop journal")
+				return nil, fmt.Errorf("legacy v0 diff layer with incomplete storage-diff: %w", errUnexpectedVersion)
+			}
+			jstorages = append(jstorages, journalStorage{
+				Account: st.Account,
+				Hashes:  st.Hashes,
+				Slots:   st.Slots,
+			})
+		}
+	} else if err := r.Decode(&jstorages); err != nil {
 		return nil, fmt.Errorf("load diff storages: %v", err)
 	}
 	for _, entry := range jstorages {
@@ -233,12 +267,9 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 				set[h] = nil
 			}
 		}
-		if entry.Incomplete {
-			incomplete[entry.Account] = struct{}{}
-		}
 		storages[entry.Account] = set
 	}
-	return db.loadDiffLayer(newDiffLayer(parent, root, parent.stateID()+1, block, nodes, triestate.New(accounts, storages, incomplete)), r)
+	return db.loadDiffLayer(newDiffLayer(parent, root, parent.stateID()+1, block, nodes, triestate.New(accounts, storages)), r, layerJournalVersion)
 }
 
 // journal implements the layer interface, marshaling the un-flushed trie nodes
@@ -316,9 +347,6 @@ func (dl *diffLayer) journal(w io.Writer) error {
 	storage := make([]journalStorage, 0, len(dl.states.Storages))
 	for addr, slots := range dl.states.Storages {
 		entry := journalStorage{Account: addr}
-		if _, ok := dl.states.Incomplete[addr]; ok {
-			entry.Incomplete = true
-		}
 		for slotHash, slot := range slots {
 			entry.Hashes = append(entry.Hashes, slotHash)
 			entry.Slots = append(entry.Slots, slot)
@@ -363,14 +391,13 @@ func (db *Database) Journal(root common.Hash) error {
 	if err := rlp.Encode(journal, journalVersion); err != nil {
 		return err
 	}
-	// The stored state in disk might be empty, convert the
-	// root to emptyRoot in this case.
-	_, diskroot := rawdb.ReadAccountTrieNode(db.diskdb, nil)
-	diskroot = types.TrieRootHash(diskroot)
-
 	// Secondly write out the state root in disk, ensure all layers
 	// on top are continuous with disk.
-	if err := rlp.Encode(journal, diskroot); err != nil {
+	diskRoot := types.EmptyRootHash
+	if blob := rawdb.ReadAccountTrieNode(db.diskdb, nil); len(blob) > 0 {
+		diskRoot = crypto.Keccak256Hash(blob)
+	}
+	if err := rlp.Encode(journal, diskRoot); err != nil {
 		return err
 	}
 	// Finally write out the journal of each layer in reverse order.
