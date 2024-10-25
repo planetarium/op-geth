@@ -1,6 +1,6 @@
 // This code is adapted from the following repository:
 // Repository: https://github.com/stackup-wallet/erc-4337-execution-clients
-// Original file: tracers/bundler_collector.go.template
+// Original file: tracers/bundler_collector_next.go.template
 
 package native
 
@@ -13,8 +13,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/tracing"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth/tracers"
+	"github.com/ethereum/go-ethereum/eth/tracers/internal"
 	"github.com/holiman/uint256"
 )
 
@@ -78,7 +81,7 @@ type bundlerCollectorResults struct {
 }
 
 type bundlerCollector struct {
-	env *vm.EVM
+	vm *tracing.VMContext
 
 	CallsFromEntryPoint []*entryPointCall
 	CurrentLevel        *entryPointCall
@@ -92,7 +95,7 @@ type bundlerCollector struct {
 	stopCollecting      bool
 }
 
-func newBundlerCollector(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func newBundlerCollector(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	rgx, err := regexp.Compile(
 		`^(DUP\d+|PUSH\d+|SWAP\d+|POP|ADD|SUB|MUL|DIV|EQ|LTE?|S?GTE?|SLT|SH[LR]|AND|OR|NOT|ISZERO)$`,
 	)
@@ -102,7 +105,7 @@ func newBundlerCollector(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tra
 	// event sent after all validations are done: keccak("BeforeExecution()")
 	stopCollectingTopic := "0xbb47ee3e183a558b1a2ff0874b079f3fc5478b7454eacf2bfc5af2ff5878f972"
 
-	return &bundlerCollector{
+	t := &bundlerCollector{
 		CallsFromEntryPoint: []*entryPointCall{},
 		CurrentLevel:        nil,
 		Keccak:              []hexutil.Bytes{},
@@ -113,6 +116,16 @@ func newBundlerCollector(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tra
 		allowedOpcodeRegex:  rgx,
 		stopCollectingTopic: stopCollectingTopic,
 		stopCollecting:      false,
+	}
+
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart: t.OnTxStart,
+			OnEnter:   t.OnEnter,
+			OnExit:    t.OnExit,
+			OnOpcode:  t.OnOpcode,
+		},
+		GetResult: t.GetResult,
 	}, nil
 }
 
@@ -128,9 +141,7 @@ func (b *bundlerCollector) isEXTorCALL(opcode string) bool {
 // [OP-062]
 func (b *bundlerCollector) isAllowedPrecompile(addr common.Address) bool {
 	addrInt := addr.Big()
-	isWithinRange := addrInt.Cmp(big.NewInt(0)) == 1 && addrInt.Cmp(big.NewInt(10)) == -1
-	isP256VerifyAddress := addr.Cmp(common.BytesToAddress([]byte{0x01, 0x00})) == 0
-	return isWithinRange || isP256VerifyAddress
+	return addrInt.Cmp(big.NewInt(0)) == 1 && addrInt.Cmp(big.NewInt(10)) == -1
 }
 
 func (b *bundlerCollector) incrementCount(m map[string]uint64, k string) {
@@ -140,34 +151,14 @@ func (b *bundlerCollector) incrementCount(m map[string]uint64, k string) {
 	m[k]++
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (b *bundlerCollector) CaptureStart(
-	env *vm.EVM,
+func (b *bundlerCollector) OnTxStart(
+	vm *tracing.VMContext,
+	tx *types.Transaction,
 	from common.Address,
-	to common.Address,
-	create bool,
-	input []byte,
-	gas uint64,
-	value *big.Int,
 ) {
-	b.env = env
+	b.vm = vm
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (b *bundlerCollector) CaptureEnd(output []byte, gasUsed uint64, err error) {}
-
-// CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (b *bundlerCollector) CaptureFault(
-	pc uint64,
-	op vm.OpCode,
-	gas, cost uint64,
-	scope *vm.ScopeContext,
-	depth int,
-	err error,
-) {
-}
-
-// GetResult returns an empty json object.
 func (b *bundlerCollector) GetResult() (json.RawMessage, error) {
 	bcr := bundlerCollectorResults{
 		CallsFromEntryPoint: b.CallsFromEntryPoint,
@@ -183,9 +174,9 @@ func (b *bundlerCollector) GetResult() (json.RawMessage, error) {
 	return r, nil
 }
 
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (b *bundlerCollector) CaptureEnter(
-	op vm.OpCode,
+func (b *bundlerCollector) OnEnter(
+	depth int,
+	typ byte,
 	from common.Address,
 	to common.Address,
 	input []byte,
@@ -196,6 +187,7 @@ func (b *bundlerCollector) CaptureEnter(
 		return
 	}
 
+	op := vm.OpCode(typ)
 	method := []byte{}
 	if len(input) >= 4 {
 		method = append(method, input[:4]...)
@@ -210,9 +202,7 @@ func (b *bundlerCollector) CaptureEnter(
 	})
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (b *bundlerCollector) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (b *bundlerCollector) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	if b.stopCollecting {
 		return
 	}
@@ -228,12 +218,11 @@ func (b *bundlerCollector) CaptureExit(output []byte, gasUsed uint64, err error)
 	})
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (b *bundlerCollector) CaptureState(
+func (b *bundlerCollector) OnOpcode(
 	pc uint64,
-	op vm.OpCode,
+	op byte,
 	gas, cost uint64,
-	scope *vm.ScopeContext,
+	scope tracing.OpContext,
 	rData []byte,
 	depth int,
 	err error,
@@ -241,12 +230,13 @@ func (b *bundlerCollector) CaptureState(
 	if b.stopCollecting {
 		return
 	}
-	opcode := op.String()
+	opcode := vm.OpCode(op).String()
 
-	stackSize := len(scope.Stack.Data())
+	stackSize := len(scope.StackData())
+	stackLast := stackSize - 1
 	stackTop3 := partialStack{}
 	for i := 0; i < 3 && i < stackSize; i++ {
-		stackTop3 = append(stackTop3, scope.Stack.Back(i).Clone())
+		stackTop3 = append(stackTop3, scope.StackData()[stackLast-i].Clone())
 	}
 	b.lastThreeOpCodes = append(b.lastThreeOpCodes, &lastThreeOpCodesItem{
 		Opcode:    opcode,
@@ -263,9 +253,11 @@ func (b *bundlerCollector) CaptureState(
 	if opcode == "REVERT" || opcode == "RETURN" {
 		// exit() is not called on top-level return/revert, so we reconstruct it from opcode
 		if depth == 1 {
-			ofs := scope.Stack.Back(0).ToBig().Int64()
-			len := scope.Stack.Back(1).ToBig().Int64()
-			data := scope.Memory.GetCopy(ofs, len)
+			ofs := scope.StackData()[stackLast].ToBig().Int64()
+			len := scope.StackData()[stackLast-1].ToBig().Int64()
+			data := make([]byte, len)
+			m, _ := internal.GetMemoryCopyPadded(scope.MemoryData(), ofs, len)
+			copy(data, m)
 			b.Calls = append(b.Calls, &callsItem{
 				Type:    opcode,
 				GasUsed: 0,
@@ -278,9 +270,11 @@ func (b *bundlerCollector) CaptureState(
 
 	if depth == 1 {
 		if opcode == "CALL" || opcode == "STATICCALL" {
-			addr := common.HexToAddress(scope.Stack.Back(1).Hex())
-			ofs := scope.Stack.Back(3).ToBig().Int64()
-			sig := scope.Memory.GetCopy(ofs, 4)
+			addr := common.HexToAddress(scope.StackData()[stackLast-1].Hex())
+			ofs := scope.StackData()[stackLast-3].ToBig().Int64()
+			sig := make([]byte, 4)
+			m, _ := internal.GetMemoryCopyPadded(scope.MemoryData(), ofs, ofs+4)
+			copy(sig, m)
 
 			b.CurrentLevel = &entryPointCall{
 				TopLevelMethodSig:     sig,
@@ -292,7 +286,7 @@ func (b *bundlerCollector) CaptureState(
 				OOG:                   false,
 			}
 			b.CallsFromEntryPoint = append(b.CallsFromEntryPoint, b.CurrentLevel)
-		} else if opcode == "LOG1" && scope.Stack.Back(2).Hex() == b.stopCollectingTopic {
+		} else if opcode == "LOG1" && scope.StackData()[stackLast-2].Hex() == b.stopCollectingTopic {
 			b.stopCollecting = true
 		}
 		b.lastOp = ""
@@ -325,11 +319,11 @@ func (b *bundlerCollector) CaptureState(
 		if !strings.HasPrefix(opcode, "EXT") {
 			n = 1
 		}
-		addr := common.BytesToAddress(scope.Stack.Back(n).Bytes())
+		addr := common.BytesToAddress(scope.StackData()[stackLast-n].Bytes())
 
 		if _, ok := b.CurrentLevel.ContractSize[addr]; !ok && !b.isAllowedPrecompile(addr) {
 			b.CurrentLevel.ContractSize[addr] = &contractSizeVal{
-				ContractSize: b.env.StateDB.GetCodeSize(addr),
+				ContractSize: len(b.vm.StateDB.GetCode(addr)),
 				Opcode:       opcode,
 			}
 		}
@@ -346,9 +340,9 @@ func (b *bundlerCollector) CaptureState(
 	b.lastOp = opcode
 
 	if opcode == "SLOAD" || opcode == "SSTORE" {
-		slot := common.BytesToHash(scope.Stack.Back(0).Bytes())
+		slot := common.BytesToHash(scope.StackData()[stackLast].Bytes())
 		slotHex := slot.Hex()
-		addr := scope.Contract.Address()
+		addr := scope.Address()
 		if _, ok := b.CurrentLevel.Access[addr]; !ok {
 			b.CurrentLevel.Access[addr] = &access{
 				Reads:  map[string]string{},
@@ -363,7 +357,7 @@ func (b *bundlerCollector) CaptureState(
 			_, rOk := access.Reads[slotHex]
 			_, wOk := access.Writes[slotHex]
 			if !rOk && !wOk {
-				access.Reads[slotHex] = string(b.env.StateDB.GetState(addr, slot).Hex())
+				access.Reads[slotHex] = string(b.vm.StateDB.GetState(addr, slot).Hex())
 			}
 		} else {
 			b.incrementCount(access.Writes, slotHex)
@@ -372,33 +366,30 @@ func (b *bundlerCollector) CaptureState(
 
 	if opcode == "KECCAK256" {
 		// collect keccak on 64-byte blocks
-		ofs := scope.Stack.Back(0).ToBig().Int64()
-		len := scope.Stack.Back(1).ToBig().Int64()
+		ofs := scope.StackData()[stackLast].ToBig().Int64()
+		len := scope.StackData()[stackLast-1].ToBig().Int64()
 		// currently, solidity uses only 2-word (6-byte) for a key. this might change..still, no need to
 		// return too much
 		if len > 20 && len < 512 {
-			b.Keccak = append(b.Keccak, scope.Memory.GetCopy(ofs, len))
+			data := make([]byte, len)
+			m, _ := internal.GetMemoryCopyPadded(scope.MemoryData(), ofs, len)
+			copy(data, m)
+			b.Keccak = append(b.Keccak, data)
 		}
 	} else if strings.HasPrefix(opcode, "LOG") {
 		count, _ := strconv.Atoi(opcode[3:])
-		ofs := scope.Stack.Back(0).ToBig().Int64()
-		len := scope.Stack.Back(1).ToBig().Int64()
+		ofs := scope.StackData()[stackLast].ToBig().Int64()
+		len := scope.StackData()[stackLast-1].ToBig().Int64()
 		topics := []hexutil.Bytes{}
 		for i := 0; i < count; i++ {
-			topics = append(topics, scope.Stack.Back(2+i).Bytes())
+			topics = append(topics, scope.StackData()[stackLast-(2+i)].Bytes())
 		}
-
+		data := make([]byte, len)
+		m, _ := internal.GetMemoryCopyPadded(scope.MemoryData(), ofs, len)
+		copy(data, m)
 		b.Logs = append(b.Logs, &logsItem{
-			Data:  scope.Memory.GetCopy(ofs, len),
+			Data:  data,
 			Topic: topics,
 		})
 	}
-}
-
-func (b *bundlerCollector) CaptureTxStart(gasLimit uint64) {}
-
-func (b *bundlerCollector) CaptureTxEnd(restGas uint64) {}
-
-// Stop terminates execution of the tracer at the first opportune moment.
-func (b *bundlerCollector) Stop(err error) {
 }

@@ -1,6 +1,6 @@
 // This code is adapted from the following repository:
 // Repository: https://github.com/stackup-wallet/erc-4337-execution-clients
-// Original file: tracers/bundler_executor.go.template
+// Original file: tracers/bundler_executor_next.go.template
 
 package native
 
@@ -13,8 +13,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/tracing"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth/tracers"
+	"github.com/ethereum/go-ethereum/eth/tracers/internal"
 )
 
 func init() {
@@ -42,7 +45,7 @@ type gasStackItem struct {
 }
 
 type bundlerExecutor struct {
-	env *vm.EVM
+	vm *tracing.VMContext
 
 	Reverts            []hexutil.Bytes
 	ValidationOOG      bool
@@ -60,10 +63,10 @@ type bundlerExecutor struct {
 	userOperationEventTopics0 string
 }
 
-func newBundlerExecutor(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func newBundlerExecutor(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	userOperationEventTopics0 := "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
 
-	return &bundlerExecutor{
+	t := &bundlerExecutor{
 		Reverts:            []hexutil.Bytes{},
 		ValidationOOG:      false,
 		ExecutionOOG:       false,
@@ -78,6 +81,16 @@ func newBundlerExecutor(ctx *tracers.Context, cfg json.RawMessage) (tracers.Trac
 		validationMarker:          1,
 		executionMarker:           3,
 		userOperationEventTopics0: userOperationEventTopics0,
+	}
+
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart: t.OnTxStart,
+			OnEnter:   t.OnEnter,
+			OnExit:    t.OnExit,
+			OnOpcode:  t.OnOpcode,
+		},
+		GetResult: t.GetResult,
 	}, nil
 }
 
@@ -89,56 +102,46 @@ func (b *bundlerExecutor) isExecution() bool {
 	return b.marker == b.executionMarker
 }
 
-func (b *bundlerExecutor) isUserOperationEvent(scope *vm.ScopeContext) bool {
-	return scope.Stack.Back(2).Hex() == b.userOperationEventTopics0
+func (b *bundlerExecutor) isUserOperationEvent(scope tracing.OpContext) bool {
+	stackSize := len(scope.StackData())
+	stackLast := stackSize - 1
+	return scope.StackData()[stackLast-2].Hex() == b.userOperationEventTopics0
 }
 
-func (b *bundlerExecutor) setUserOperationEvent(opcode string, scope *vm.ScopeContext) {
+func (b *bundlerExecutor) setUserOperationEvent(opcode string, scope tracing.OpContext) {
+	stackSize := len(scope.StackData())
+
+	stackLast := stackSize - 1
 	count, _ := strconv.Atoi(opcode[3:])
-	ofs := scope.Stack.Back(0).ToBig().Int64()
-	len := scope.Stack.Back(1).ToBig().Int64()
+	ofs := scope.StackData()[stackLast].ToBig().Int64()
+	len := scope.StackData()[stackLast-1].ToBig().Int64()
 	topics := []hexutil.Bytes{}
 	for i := 0; i < count; i++ {
-		topics = append(topics, scope.Stack.Back(2+i).Bytes())
+		topics = append(topics, scope.StackData()[stackLast-(2+i)].Bytes())
 	}
 
+	m, _ := internal.GetMemoryCopyPadded(scope.MemoryData(), ofs, len)
 	b.UserOperationEvent = &userOperationEvent{
-		Data:   scope.Memory.GetCopy(ofs, len),
+		Data:   m,
 		Topics: topics,
 	}
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (b *bundlerExecutor) CaptureStart(
-	env *vm.EVM,
-	from common.Address,
-	to common.Address,
-	create bool,
-	input []byte,
-	gas uint64,
-	value *big.Int,
-) {
-	b.env = env
-}
-
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (b *bundlerExecutor) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (b *bundlerExecutor) captureEnd(output []byte, err error) {
 	b.Output = output
-	b.Error = err.Error()
+	if err != nil {
+		b.Error = err.Error()
+	}
 }
 
-// CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (b *bundlerExecutor) CaptureFault(
-	pc uint64,
-	op vm.OpCode,
-	gas, cost uint64,
-	scope *vm.ScopeContext,
-	depth int,
-	err error,
+func (b *bundlerExecutor) OnTxStart(
+	vm *tracing.VMContext,
+	tx *types.Transaction,
+	from common.Address,
 ) {
+	b.vm = vm
 }
 
-// GetResult returns an empty json object.
 func (b *bundlerExecutor) GetResult() (json.RawMessage, error) {
 	ber := bundlerExecutorResults{
 		Reverts:            b.Reverts,
@@ -157,9 +160,9 @@ func (b *bundlerExecutor) GetResult() (json.RawMessage, error) {
 	return r, nil
 }
 
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (b *bundlerExecutor) CaptureEnter(
-	op vm.OpCode,
+func (b *bundlerExecutor) OnEnter(
+	depth int,
+	typ byte,
 	from common.Address,
 	to common.Address,
 	input []byte,
@@ -174,9 +177,12 @@ func (b *bundlerExecutor) CaptureEnter(
 	}
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (b *bundlerExecutor) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (b *bundlerExecutor) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if depth == 0 {
+		b.captureEnd(output, err)
+		return
+	}
+
 	if b.isExecution() {
 		if err != nil {
 			b.Reverts = append(b.Reverts, output)
@@ -208,17 +214,16 @@ func (b *bundlerExecutor) CaptureExit(output []byte, gasUsed uint64, err error) 
 	}
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (b *bundlerExecutor) CaptureState(
+func (b *bundlerExecutor) OnOpcode(
 	pc uint64,
-	op vm.OpCode,
+	op byte,
 	gas, cost uint64,
-	scope *vm.ScopeContext,
+	scope tracing.OpContext,
 	rData []byte,
 	depth int,
 	err error,
 ) {
-	opcode := op.String()
+	opcode := vm.OpCode(op).String()
 	b.depth = depth
 	if b.depth == 1 && opcode == "NUMBER" {
 		b.marker++
@@ -235,12 +240,4 @@ func (b *bundlerExecutor) CaptureState(
 	if gas < cost && b.isExecution() {
 		b.ExecutionOOG = true
 	}
-}
-
-func (b *bundlerExecutor) CaptureTxStart(gasLimit uint64) {}
-
-func (b *bundlerExecutor) CaptureTxEnd(restGas uint64) {}
-
-// Stop terminates execution of the tracer at the first opportune moment.
-func (b *bundlerExecutor) Stop(err error) {
 }
