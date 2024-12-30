@@ -134,7 +134,7 @@ def:
           description: |
             The rollup functionality is enabled with the `optimism` field in the chain config.
             The EIP-1559 parameters are configurable to adjust for faster more frequent and smaller blocks.
-            The parameters can be overriden for testing.
+            The parameters can be overridden for testing.
           globs:
             - "params/config.go"
             - "params/protocol_params.go"
